@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Microservices App</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+    padding: 2rem;
+  }
+  h1 { margin-top: 0; }
+  h1 span { color: #38bdf8; }
+  .subtitle { color: #94a3b8; margin-bottom: 2rem; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.5rem;
+  }
+  .card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 1.25rem;
+  }
+  .card h2 {
+    margin-top: 0;
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .badge {
+    font-size: 0.7rem;
+    background: #334155;
+    color: #94a3b8;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-weight: normal;
+  }
+  form { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+  input {
+    flex: 1;
+    min-width: 100px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 0.5rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+  }
+  button {
+    background: #38bdf8;
+    color: #0f172a;
+    border: none;
+    padding: 0.5rem 0.9rem;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  button:hover { background: #7dd3fc; }
+  button.danger { background: #f87171; }
+  button.danger:hover { background: #fca5a5; }
+  button.secondary { background: #475569; color: #e2e8f0; }
+  button.secondary:hover { background: #64748b; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.4rem 0.3rem; border-bottom: 1px solid #334155; }
+  th { color: #94a3b8; font-weight: 500; }
+  .row-actions { display: flex; gap: 0.3rem; }
+  .empty { color: #64748b; font-size: 0.85rem; padding: 0.5rem 0; }
+  .status { font-size: 0.75rem; margin-top: 0.5rem; min-height: 1rem; }
+  .status.ok { color: #4ade80; }
+  .status.err { color: #f87171; }
+</style>
+</head>
+<body>
+
+<h1>🧩 <span>Microservices App</span></h1>
+<p class="subtitle">Gateway (puerto 3001) → users-service (4001) · products-service (4002) · orders-service (4003)</p>
+
+<div class="grid">
+
+  <!-- USUARIOS -->
+  <div class="card">
+    <h2>👤 Usuarios <span class="badge">/users</span></h2>
+    <form id="form-user">
+      <input name="name" placeholder="Nombre" required />
+      <input name="email" placeholder="Email" required />
+      <input name="password" placeholder="Password" required />
+      <button type="submit">Registrar</button>
+    </form>
+    <table>
+      <thead><tr><th>Nombre</th><th>Email</th><th></th></tr></thead>
+      <tbody id="tbody-users"></tbody>
+    </table>
+    <div class="status" id="status-users"></div>
+  </div>
+
+  <!-- PRODUCTOS -->
+  <div class="card">
+    <h2>🛒 Productos <span class="badge">/products</span></h2>
+    <form id="form-product">
+      <input name="name" placeholder="Nombre" required />
+      <input name="price" placeholder="Precio" type="number" required />
+      <input name="category" placeholder="Categoría" required />
+      <button type="submit">Agregar</button>
+    </form>
+    <table>
+      <thead><tr><th>Nombre</th><th>Precio</th><th>Categoría</th><th></th></tr></thead>
+      <tbody id="tbody-products"></tbody>
+    </table>
+    <div class="status" id="status-products"></div>
+  </div>
+
+  <!-- PEDIDOS -->
+  <div class="card">
+    <h2>📦 Pedidos <span class="badge">/orders</span></h2>
+    <form id="form-order">
+      <input name="userId" placeholder="User ID" required />
+      <input name="productId" placeholder="Product ID" required />
+      <input name="quantity" placeholder="Cantidad" type="number" required />
+      <button type="submit">Crear pedido</button>
+    </form>
+    <table>
+      <thead><tr><th>User</th><th>Producto</th><th>Cant.</th><th></th></tr></thead>
+      <tbody id="tbody-orders"></tbody>
+    </table>
+    <div class="status" id="status-orders"></div>
+  </div>
+
+</div>
+
+<script>
+function showStatus(id, msg, ok) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = "status " + (ok ? "ok" : "err");
+  setTimeout(() => { el.textContent = ""; }, 3000);
+}
+
+// ---------- USERS ----------
+async function loadUsers() {
+  const res = await fetch("/users");
+  const users = await res.json();
+  const tbody = document.getElementById("tbody-users");
+  tbody.innerHTML = users.length ? "" : '<tr><td colspan="3" class="empty">Sin usuarios registrados</td></tr>';
+  users.forEach(u => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${u.name}</td>
+      <td>${u.email}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick="editUser('${u._id}','${u.name}','${u.email}')">Editar</button>
+        <button class="danger" onclick="deleteUser('${u._id}')">Eliminar</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+document.getElementById("form-user").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const body = { name: f.name.value, email: f.email.value, password: f.password.value };
+  const res = await fetch("/register", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  showStatus("status-users", res.ok ? "Usuario registrado" : "Error al registrar", res.ok);
+  f.reset();
+  loadUsers();
+});
+async function editUser(id, name, email) {
+  const newName = prompt("Nuevo nombre:", name);
+  if (newName === null) return;
+  const newEmail = prompt("Nuevo email:", email);
+  if (newEmail === null) return;
+  const res = await fetch(`/users/${id}`, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name: newName, email: newEmail }) });
+  showStatus("status-users", res.ok ? "Usuario actualizado" : "Error al actualizar", res.ok);
+  loadUsers();
+}
+async function deleteUser(id) {
+  if (!confirm("¿Eliminar este usuario?")) return;
+  const res = await fetch(`/users/${id}`, { method: "DELETE" });
+  showStatus("status-users", res.ok ? "Usuario eliminado" : "Error al eliminar", res.ok);
+  loadUsers();
+}
+
+// ---------- PRODUCTS ----------
+async function loadProducts() {
+  const res = await fetch("/products");
+  const products = await res.json();
+  const tbody = document.getElementById("tbody-products");
+  tbody.innerHTML = products.length ? "" : '<tr><td colspan="4" class="empty">Sin productos registrados</td></tr>';
+  products.forEach(p => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${p.name}</td>
+      <td>$${p.price}</td>
+      <td>${p.category || ""}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick="editProduct('${p._id}','${p.name}',${p.price})">Editar</button>
+        <button class="danger" onclick="deleteProduct('${p._id}')">Eliminar</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+document.getElementById("form-product").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const body = { name: f.name.value, price: Number(f.price.value), category: f.category.value };
+  const res = await fetch("/products", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  showStatus("status-products", res.ok ? "Producto agregado" : "Error al agregar", res.ok);
+  f.reset();
+  loadProducts();
+});
+async function editProduct(id, name, price) {
+  const newName = prompt("Nuevo nombre:", name);
+  if (newName === null) return;
+  const newPrice = prompt("Nuevo precio:", price);
+  if (newPrice === null) return;
+  const res = await fetch(`/products/${id}`, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name: newName, price: Number(newPrice) }) });
+  showStatus("status-products", res.ok ? "Producto actualizado" : "Error al actualizar", res.ok);
+  loadProducts();
+}
+async function deleteProduct(id) {
+  if (!confirm("¿Eliminar este producto?")) return;
+  const res = await fetch(`/products/${id}`, { method: "DELETE" });
+  showStatus("status-products", res.ok ? "Producto eliminado" : "Error al eliminar", res.ok);
+  loadProducts();
+}
+
+// ---------- ORDERS ----------
+async function loadOrders() {
+  const res = await fetch("/orders");
+  const orders = await res.json();
+  const tbody = document.getElementById("tbody-orders");
+  tbody.innerHTML = orders.length ? "" : '<tr><td colspan="4" class="empty">Sin pedidos registrados</td></tr>';
+  orders.forEach(o => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${o.userId}</td>
+      <td>${o.productId}</td>
+      <td>${o.quantity}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick="editOrder('${o._id}',${o.quantity})">Editar</button>
+        <button class="danger" onclick="deleteOrder('${o._id}')">Eliminar</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+document.getElementById("form-order").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const body = { userId: f.userId.value, productId: f.productId.value, quantity: Number(f.quantity.value) };
+  const res = await fetch("/orders", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  showStatus("status-orders", res.ok ? "Pedido creado" : "Error al crear", res.ok);
+  f.reset();
+  loadOrders();
+});
+async function editOrder(id, quantity) {
+  const newQty = prompt("Nueva cantidad:", quantity);
+  if (newQty === null) return;
+  const res = await fetch(`/orders/${id}`, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ quantity: Number(newQty) }) });
+  showStatus("status-orders", res.ok ? "Pedido actualizado" : "Error al actualizar", res.ok);
+  loadOrders();
+}
+async function deleteOrder(id) {
+  if (!confirm("¿Eliminar este pedido?")) return;
+  const res = await fetch(`/orders/${id}`, { method: "DELETE" });
+  showStatus("status-orders", res.ok ? "Pedido eliminado" : "Error al eliminar", res.ok);
+  loadOrders();
+}
+
+loadUsers();
+loadProducts();
+loadOrders();
+</script>
+
+</body>
+</html>
