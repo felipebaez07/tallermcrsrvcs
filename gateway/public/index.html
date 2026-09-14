@@ -311,7 +311,9 @@ async function deleteOrder(id) {
 }
 
 // Usuarios y productos primero: la tabla de Pedidos necesita sus nombres para pintarse.
-Promise.all([loadUsers(), loadProducts()]).then(loadOrders);
+// allSettled y no all: si un servicio esta caido, Pedidos igual se pinta (con los
+// nombres que falten marcados como eliminados) en vez de quedarse en blanco.
+Promise.allSettled([loadUsers(), loadProducts()]).then(loadOrders);
 </script>
 
 </body>
