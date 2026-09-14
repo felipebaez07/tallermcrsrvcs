@@ -14,6 +14,11 @@ app.post("/register", async (req, res) => {
   res.send({ message: "Usuario registrado", user });
 });
 
+app.get("/users", async (req, res) => {
+  const users = await User.find();
+  res.send(users);
+});
+
 app.get("/users/:id", async (req, res) => {
   try {
     const { id } = req.params;

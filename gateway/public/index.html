@@ -42,7 +42,7 @@
     font-weight: normal;
   }
   form { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
-  input {
+  input, select {
     flex: 1;
     min-width: 100px;
     background: #0f172a;
@@ -52,6 +52,8 @@
     border-radius: 6px;
     font-size: 0.85rem;
   }
+  select { cursor: pointer; flex-basis: 100%; }
+  select:disabled { opacity: 0.55; cursor: not-allowed; }
   button {
     background: #38bdf8;
     color: #0f172a;
@@ -72,6 +74,7 @@
   th { color: #94a3b8; font-weight: 500; }
   .row-actions { display: flex; gap: 0.3rem; }
   .empty { color: #64748b; font-size: 0.85rem; padding: 0.5rem 0; }
+  .muted { color: #64748b; font-style: italic; }
   .status { font-size: 0.75rem; margin-top: 0.5rem; min-height: 1rem; }
   .status.ok { color: #4ade80; }
   .status.err { color: #f87171; }
@@ -120,8 +123,8 @@
   <div class="card">
     <h2>📦 Pedidos <span class="badge">/orders</span></h2>
     <form id="form-order">
-      <input name="userId" placeholder="User ID" required />
-      <input name="productId" placeholder="Product ID" required />
+      <select name="userId" id="select-user" required></select>
+      <select name="productId" id="select-product" required></select>
       <input name="quantity" placeholder="Cantidad" type="number" required />
       <button type="submit">Crear pedido</button>
     </form>
@@ -142,10 +145,35 @@ function showStatus(id, msg, ok) {
   setTimeout(() => { el.textContent = ""; }, 3000);
 }
 
+// Pedidos necesita los nombres de usuarios y productos, no solo sus IDs,
+// asi que guardamos aqui lo ultimo que devolvieron sus servicios.
+let usersCache = [];
+let productsCache = [];
+
+function llenarSelect(selectId, items, texto, vacio) {
+  const sel = document.getElementById(selectId);
+  const previo = sel.value;
+  if (!items.length) {
+    sel.innerHTML = `<option value="">${vacio}</option>`;
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  sel.innerHTML = items.map(i => `<option value="${i._id}">${texto(i)}</option>`).join("");
+  if (items.some(i => i._id === previo)) sel.value = previo; // no perder lo elegido al recargar
+}
+
+function nombrePorId(cache, id, etiqueta) {
+  const item = cache.find(x => x._id === id);
+  return item ? item.name : `<span class="muted">${etiqueta} eliminado</span>`;
+}
+
 // ---------- USERS ----------
 async function loadUsers() {
   const res = await fetch("/users");
   const users = await res.json();
+  usersCache = users;
+  llenarSelect("select-user", users, u => u.name, "— Registra un usuario primero —");
   const tbody = document.getElementById("tbody-users");
   tbody.innerHTML = users.length ? "" : '<tr><td colspan="3" class="empty">Sin usuarios registrados</td></tr>';
   users.forEach(u => {
@@ -176,19 +204,23 @@ async function editUser(id, name, email) {
   if (newEmail === null) return;
   const res = await fetch(`/users/${id}`, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name: newName, email: newEmail }) });
   showStatus("status-users", res.ok ? "Usuario actualizado" : "Error al actualizar", res.ok);
-  loadUsers();
+  await loadUsers();
+  loadOrders(); // el nombre cambio: repintar la tabla de pedidos
 }
 async function deleteUser(id) {
   if (!confirm("¿Eliminar este usuario?")) return;
   const res = await fetch(`/users/${id}`, { method: "DELETE" });
   showStatus("status-users", res.ok ? "Usuario eliminado" : "Error al eliminar", res.ok);
-  loadUsers();
+  await loadUsers();
+  loadOrders(); // sus pedidos quedan huerfanos: marcarlos como "usuario eliminado"
 }
 
 // ---------- PRODUCTS ----------
 async function loadProducts() {
   const res = await fetch("/products");
   const products = await res.json();
+  productsCache = products;
+  llenarSelect("select-product", products, p => `${p.name} — $${p.price}`, "— Agrega un producto primero —");
   const tbody = document.getElementById("tbody-products");
   tbody.innerHTML = products.length ? "" : '<tr><td colspan="4" class="empty">Sin productos registrados</td></tr>';
   products.forEach(p => {
@@ -220,13 +252,15 @@ async function editProduct(id, name, price) {
   if (newPrice === null) return;
   const res = await fetch(`/products/${id}`, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name: newName, price: Number(newPrice) }) });
   showStatus("status-products", res.ok ? "Producto actualizado" : "Error al actualizar", res.ok);
-  loadProducts();
+  await loadProducts();
+  loadOrders();
 }
 async function deleteProduct(id) {
   if (!confirm("¿Eliminar este producto?")) return;
   const res = await fetch(`/products/${id}`, { method: "DELETE" });
   showStatus("status-products", res.ok ? "Producto eliminado" : "Error al eliminar", res.ok);
-  loadProducts();
+  await loadProducts();
+  loadOrders();
 }
 
 // ---------- ORDERS ----------
@@ -238,8 +272,8 @@ async function loadOrders() {
   orders.forEach(o => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${o.userId}</td>
-      <td>${o.productId}</td>
+      <td>${nombrePorId(usersCache, o.userId, "usuario")}</td>
+      <td>${nombrePorId(productsCache, o.productId, "producto")}</td>
       <td>${o.quantity}</td>
       <td class="row-actions">
         <button class="secondary" onclick="editOrder('${o._id}',${o.quantity})">Editar</button>
@@ -251,6 +285,11 @@ async function loadOrders() {
 document.getElementById("form-order").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = e.target;
+  // Un <select disabled> queda fuera de la validacion del navegador, asi que
+  // sin usuarios o sin productos hay que frenar el envio a mano.
+  if (!f.userId.value || !f.productId.value) {
+    return showStatus("status-orders", "Necesitas al menos un usuario y un producto", false);
+  }
   const body = { userId: f.userId.value, productId: f.productId.value, quantity: Number(f.quantity.value) };
   const res = await fetch("/orders", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
   showStatus("status-orders", res.ok ? "Pedido creado" : "Error al crear", res.ok);
@@ -271,9 +310,10 @@ async function deleteOrder(id) {
   loadOrders();
 }
 
-loadUsers();
-loadProducts();
-loadOrders();
+// Usuarios y productos primero: la tabla de Pedidos necesita sus nombres para pintarse.
+// allSettled y no all: si un servicio esta caido, Pedidos igual se pinta (con los
+// nombres que falten marcados como eliminados) en vez de quedarse en blanco.
+Promise.allSettled([loadUsers(), loadProducts()]).then(loadOrders);
 </script>
 
 </body>
