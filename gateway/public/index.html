@@ -78,12 +78,67 @@
   .status { font-size: 0.75rem; margin-top: 0.5rem; min-height: 1rem; }
   .status.ok { color: #4ade80; }
   .status.err { color: #f87171; }
+.resumen {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .stat {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 0.9rem 1rem;
+  }
+  .stat-label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #94a3b8;
+    margin-bottom: 0.35rem;
+  }
+  .stat-value { display: block; font-size: 1.5rem; font-weight: 600; }
+  .stat-note { display: block; font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; min-height: 1rem; }
+  .stat.small .stat-value { font-size: 1.05rem; line-height: 1.35; word-break: break-word; }
+  .stat.warn { border-color: #f87171; }
+  .stat.warn .stat-note { color: #f87171; }
+  .stat.off .stat-value { color: #64748b; }
 </style>
 </head>
 <body>
 
 <h1>🧩 <span>Microservices App</span></h1>
 <p class="subtitle">Gateway (puerto 3001) → users-service (4001) · products-service (4002) · orders-service (4003)</p>
+
+<!-- RESUMEN: se calcula en el navegador cruzando los tres servicios -->
+<section class="resumen">
+  <div class="stat" id="stat-usuarios">
+    <span class="stat-label">Usuarios</span>
+    <span class="stat-value">—</span>
+    <span class="stat-note"></span>
+  </div>
+  <div class="stat" id="stat-productos">
+    <span class="stat-label">Productos</span>
+    <span class="stat-value">—</span>
+    <span class="stat-note"></span>
+  </div>
+  <div class="stat" id="stat-pedidos">
+    <span class="stat-label">Pedidos</span>
+    <span class="stat-value">—</span>
+    <span class="stat-note"></span>
+  </div>
+  <div class="stat" id="stat-valor">
+    <span class="stat-label">Valor de los pedidos</span>
+    <span class="stat-value">—</span>
+    <span class="stat-note"></span>
+  </div>
+  <div class="stat small" id="stat-estrella">
+    <span class="stat-label">Producto más pedido</span>
+    <span class="stat-value">—</span>
+    <span class="stat-note"></span>
+  </div>
+</section>
 
 <div class="grid">
 
@@ -149,6 +204,11 @@ function showStatus(id, msg, ok) {
 // asi que guardamos aqui lo ultimo que devolvieron sus servicios.
 let usersCache = [];
 let productsCache = [];
+let ordersCache = [];
+
+// Si un servicio falla no podemos mostrar un cero, que se lee como un dato real:
+// estas banderas dicen de quien tenemos datos frescos y de quien no.
+const estado = { users: false, products: false, orders: false };
 
 function llenarSelect(selectId, items, texto, vacio) {
   const sel = document.getElementById(selectId);
@@ -168,11 +228,90 @@ function nombrePorId(cache, id, etiqueta) {
   return item ? item.name : `<span class="muted">${etiqueta} eliminado</span>`;
 }
 
+// ---------- RESUMEN ----------
+// El gateway solo enruta, no hay un endpoint que junte los tres servicios,
+// asi que el resumen se arma aqui con lo ultimo que devolvio cada uno.
+function moneda(n) {
+  return "$" + n.toLocaleString("es-CO", { maximumFractionDigits: 2 });
+}
+
+function pintarStat(id, valor, nota, clase) {
+  const stat = document.getElementById(id);
+  stat.className = "stat" + (clase ? " " + clase : "");
+  stat.querySelector(".stat-value").textContent = valor;
+  stat.querySelector(".stat-note").textContent = nota || "";
+}
+
+function plural(n, singular, plural_) {
+  return n + " " + (n === 1 ? singular : plural_);
+}
+
+function renderResumen() {
+  pintarStat("stat-usuarios",
+    estado.users ? usersCache.length : "—",
+    estado.users ? "registrados" : "servicio no disponible",
+    estado.users ? "" : "off");
+
+  pintarStat("stat-productos",
+    estado.products ? productsCache.length : "—",
+    estado.products ? "en el catálogo" : "servicio no disponible",
+    estado.products ? "" : "off");
+
+  if (!estado.orders) {
+    pintarStat("stat-pedidos", "—", "servicio no disponible", "off");
+    pintarStat("stat-valor", "—", "sin datos de pedidos", "off");
+    pintarStat("stat-estrella", "—", "sin datos de pedidos", "small off");
+    return;
+  }
+
+  const unidades = ordersCache.reduce((t, o) => t + (o.quantity || 0), 0);
+  pintarStat("stat-pedidos", ordersCache.length,
+    ordersCache.length ? plural(unidades, "unidad", "unidades") : "aún no hay pedidos");
+
+  // Sin el catalogo no hay precios ni nombres: mejor decirlo que inventar totales.
+  if (!estado.products) {
+    pintarStat("stat-valor", "—", "faltan los precios", "off");
+    pintarStat("stat-estrella", "—", "falta el catálogo", "small off");
+    return;
+  }
+
+  // Un pedido cuyo producto ya se elimino no se puede valorar. Se cuenta aparte
+  // en vez de sumarlo como cero, que dejaria un total que no cuadra con la tabla.
+  let total = 0;
+  let valorados = 0;
+  let huerfanos = 0;
+  const unidadesPorProducto = new Map();
+
+  ordersCache.forEach(o => {
+    const producto = productsCache.find(p => p._id === o.productId);
+    if (!producto) { huerfanos++; return; }
+    const cantidad = o.quantity || 0;
+    total += (producto.price || 0) * cantidad;
+    valorados++;
+    unidadesPorProducto.set(producto.name, (unidadesPorProducto.get(producto.name) || 0) + cantidad);
+  });
+
+  let notaValor;
+  if (huerfanos) notaValor = plural(huerfanos, "pedido", "pedidos") + " sin precio: producto eliminado";
+  else if (valorados) notaValor = "promedio " + moneda(total / valorados) + " por pedido";
+  else notaValor = "aún no hay pedidos";
+  pintarStat("stat-valor", moneda(total), notaValor, huerfanos ? "warn" : "");
+
+  const top = [...unidadesPorProducto.entries()].sort((a, b) => b[1] - a[1])[0];
+  pintarStat("stat-estrella",
+    top ? top[0] : "—",
+    top ? plural(top[1], "unidad pedida", "unidades pedidas") : "aún no hay pedidos",
+    "small");
+}
+
 // ---------- USERS ----------
 async function loadUsers() {
+  estado.users = false;
   const res = await fetch("/users");
   const users = await res.json();
   usersCache = users;
+  estado.users = true;
+  renderResumen();
   llenarSelect("select-user", users, u => u.name, "— Registra un usuario primero —");
   const tbody = document.getElementById("tbody-users");
   tbody.innerHTML = users.length ? "" : '<tr><td colspan="3" class="empty">Sin usuarios registrados</td></tr>';
@@ -217,9 +356,12 @@ async function deleteUser(id) {
 
 // ---------- PRODUCTS ----------
 async function loadProducts() {
+  estado.products = false;
   const res = await fetch("/products");
   const products = await res.json();
   productsCache = products;
+  estado.products = true;
+  renderResumen();
   llenarSelect("select-product", products, p => `${p.name} — $${p.price}`, "— Agrega un producto primero —");
   const tbody = document.getElementById("tbody-products");
   tbody.innerHTML = products.length ? "" : '<tr><td colspan="4" class="empty">Sin productos registrados</td></tr>';
@@ -265,8 +407,12 @@ async function deleteProduct(id) {
 
 // ---------- ORDERS ----------
 async function loadOrders() {
+  estado.orders = false;
   const res = await fetch("/orders");
   const orders = await res.json();
+  ordersCache = orders;
+  estado.orders = true;
+  renderResumen();
   const tbody = document.getElementById("tbody-orders");
   tbody.innerHTML = orders.length ? "" : '<tr><td colspan="4" class="empty">Sin pedidos registrados</td></tr>';
   orders.forEach(o => {
